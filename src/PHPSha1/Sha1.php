@@ -52,6 +52,18 @@ class Sha1
 
         return $instance->calculateHashValue();
     }
+    
+    public static function hash_array($message_array)
+    {
+        $instance = self::instance();
+
+        $instance->message = $message_array;
+
+        $instance->preProcess_array();
+        $instance->setHashValues();
+
+        return $instance->calculateHashValue_array();
+    }    
 
     /**
      * Return current instance of the Sha1
@@ -101,6 +113,37 @@ class Sha1
         }
     }
 
+    
+    protected function preProcess_array()
+    {
+        /**
+         * Store original message's length (in bits) because
+         * this will be needed for padding the message later on.
+         */
+        $originalLength = count($this->message)*8;
+
+        /*
+         * Strings in PHP are initially stored as
+         * binary values so we can append 0x80 right away.
+         */
+        array_push($this->message,128);
+
+        /*
+         * Append '0' bit to the end of the message until
+         * it's length divided by 512 has the reminder of 448.
+         */
+        while ((count($this->message)*8) % 512 !== 448) {
+            array_push($this->message,0);
+        }
+
+        /*
+         * Convert original message's length to 64 bit binary representation
+         * and append it to the end of the message as an actual binary data
+         */
+        foreach (str_split(sprintf('%064b', $originalLength), 8) as $binaryNumber) {
+            array_push($this->message,bindec($binaryNumber));
+        }
+    }
     /**
      * Set initial hash values
      */
@@ -157,6 +200,35 @@ class Sha1
         return sprintf('%08x%08x%08x%08x%08x', $this->hashValues['h0'], $this->hashValues['h1'], $this->hashValues['h2'], $this->hashValues['h3'], $this->hashValues['h4']);
     }
 
+    
+     protected function calculateHashValue_array() : string
+    {
+        /*
+         * Split message into [512-bit Chunks]
+         * and apply calculations for each chunk.
+         */
+        foreach (array_chunk($this->message, 64) as $chunk) {
+                
+            /*
+             * Apply SHA1 specific calculations
+             */
+            $this->applyChunkCalculations_array($chunk);
+
+            /*
+             * Append calculated intermediate values to hash values
+             */
+            $this->hashValues['h0'] = ($this->hashValues['h0'] + $this->intermediateValues['a']) & 0xffffffff;
+            $this->hashValues['h1'] = ($this->hashValues['h1'] + $this->intermediateValues['b']) & 0xffffffff;
+            $this->hashValues['h2'] = ($this->hashValues['h2'] + $this->intermediateValues['c']) & 0xffffffff;
+            $this->hashValues['h3'] = ($this->hashValues['h3'] + $this->intermediateValues['d']) & 0xffffffff;
+            $this->hashValues['h4'] = ($this->hashValues['h4'] + $this->intermediateValues['e']) & 0xffffffff;
+        }
+
+        /*
+         * Join calculated hash values and return it as final hash value
+         */
+        return sprintf('%08x%08x%08x%08x%08x', $this->hashValues['h0'], $this->hashValues['h1'], $this->hashValues['h2'], $this->hashValues['h3'], $this->hashValues['h4']);
+    }
     /**
      * Apply intermediate values calculation for each group of chunk.
      *
@@ -169,6 +241,17 @@ class Sha1
          * and apply calculations for intermediate values.
          */
         foreach (array_chunk($this->generateWordsForChunk($chunk), 20) as $group => $words) {
+            $this->intermediateValuesForWords($words, $group);
+        }
+    }
+    
+        protected function applyChunkCalculations_array(array $chunk)
+    {
+        /*
+         * Split each chunk into [4 Groups] of 20 words
+         * and apply calculations for intermediate values.
+         */
+        foreach (array_chunk($this->generateWordsForChunk_array($chunk), 20) as $group => $words) {
             $this->intermediateValuesForWords($words, $group);
         }
     }
@@ -210,6 +293,34 @@ class Sha1
         return $words;
     }
 
+    
+        protected function generateWordsForChunk_array(array $chunk) : array
+    {
+        /**
+         * Split a chunk into 16 32-bit (4 characters) words
+         * and convert these words into string of binary symbols.
+         */
+        $words = array_map(function($word){return ($word[0]<<24)+($word[1]<<16)+($word[2]<<8)+$word[3];},array_chunk($chunk, 4));
+        /*
+         * Extnend current 16 words into 80
+         * words by applying spedific SHA1 logic
+         */
+        for ($i = 16; $i < 80; ++$i) {
+
+            /**
+             * XOR words indexed as [i - 3] [i - 8] [i - 14] [i - 16].
+             */
+            $xored = $words[$i - 3] ^ $words[$i - 8] ^ $words[$i - 14] ^ $words[$i - 16];
+
+            /*
+             * Rotate xored result by 1 bit to the left
+             * and save it as a 32-bit unsigned integer
+             */
+            $words[$i] = BinaryHelper::decRotateLeft($xored, 1) & 0xffffffff;
+        }
+
+        return $words;
+    }
     /**
      * For each word in a group apply specific calculations for intermediate values.
      *
